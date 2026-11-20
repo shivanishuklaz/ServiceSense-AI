@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/supabase'
+import { estimateRepairCost } from '@/lib/repair-cost-data'
 
 export type Complexity = 'Low' | 'Medium' | 'High'
 
@@ -65,6 +66,12 @@ export interface ServiceRequest {
   customerLatitude: number | null
   customerLongitude: number | null
   declinedBy: string[]
+
+  estimatedCostMin: number | null
+  estimatedCostMax: number | null
+  estimatedPartsCost: number | null
+  estimatedLabourCost: number | null
+  costEstimationMethod: string | null
 }
 
 export interface Technician {
@@ -139,7 +146,17 @@ function mapRequest(row: any): ServiceRequest {
       ? null : Number(row.customer_latitude),
     customerLongitude: row.customer_longitude == null
       ? null : Number(row.customer_longitude),
-    declinedBy: row.declined_by || []
+    declinedBy: row.declined_by || [],
+
+    estimatedCostMin: row.estimated_cost_min == null
+      ? null : Number(row.estimated_cost_min),
+    estimatedCostMax: row.estimated_cost_max == null
+      ? null : Number(row.estimated_cost_max),
+    estimatedPartsCost: row.estimated_parts_cost == null
+      ? null : Number(row.estimated_parts_cost),
+    estimatedLabourCost: row.estimated_labour_cost == null
+      ? null : Number(row.estimated_labour_cost),
+    costEstimationMethod: row.cost_estimation_method || null
   }
 }
 
@@ -164,6 +181,7 @@ export async function createRequest(input: {
   customerLongitude: number
 }): Promise<ServiceRequest> {
   const diagnosis = makeDiagnosis(input.category, input.description)
+  const estimate = estimateRepairCost(input.category, input.description)
 
   const { data, error } = await supabase
     .from('service_requests_v2')
@@ -177,7 +195,17 @@ export async function createRequest(input: {
       customer_latitude: input.customerLatitude,
       customer_longitude: input.customerLongitude,
       status: 'Diagnosed',
-      diagnosis
+      diagnosis,
+
+      estimated_cost_min: estimate?.estimatedCostMin ?? null,
+      estimated_cost_max: estimate?.estimatedCostMax ?? null,
+      estimated_parts_cost: estimate
+        ? (estimate.partsMin + estimate.partsMax) / 2
+        : null,
+      estimated_labour_cost: estimate
+        ? (estimate.labourMin + estimate.labourMax) / 2
+        : null,
+      cost_estimation_method: estimate?.method ?? null
     })
     .select('*')
     .single()
@@ -195,6 +223,11 @@ export async function updateRequest(
       status: request.status,
       diagnosis: request.diagnosis,
       outcome: request.outcome || null,
+      estimated_cost_min: request.estimatedCostMin,
+      estimated_cost_max: request.estimatedCostMax,
+      estimated_parts_cost: request.estimatedPartsCost,
+      estimated_labour_cost: request.estimatedLabourCost,
+      cost_estimation_method: request.costEstimationMethod,
       updated_at: new Date().toISOString()
     })
     .eq('id', request.id)
